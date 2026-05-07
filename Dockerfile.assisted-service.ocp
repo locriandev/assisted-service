@@ -4,6 +4,7 @@ WORKDIR /src
 COPY . .
 
 RUN dnf install -y gcc nmstate-devel nmstate-libs git && dnf clean all
+RUN dnf module enable -y postgresql:16 && dnf install -y postgresql-server && dnf clean all
 RUN cd cmd && CGO_ENABLED=1 GOFLAGS="" GO111MODULE=on go build -o /build/assisted-service
 RUN cd ./cmd/operator && CGO_ENABLED=1 GOFLAGS="" GO111MODULE=on go build -o /build/assisted-service-operator
 RUN cd ./cmd/webadmission && CGO_ENABLED=1 GOFLAGS="" GO111MODULE=on go build -o /build/assisted-service-admission
@@ -18,7 +19,21 @@ LABEL io.openshift.release.operator=true
 # multiarch images need skopeo until WRKLDS-222 and https://bugzilla.redhat.com/show_bug.cgi?id=2111537 are fixed
 # ToDo: Replace postgres with SQLite DB
 # https://issues.redhat.com/browse/AGENT-223
-RUN dnf install -y postgresql-server libvirt-libs nmstate nmstate-libs skopeo openshift-clients && dnf clean all
+RUN dnf install -y libvirt-libs nmstate nmstate-libs skopeo openshift-clients && dnf clean all
+
+# Copy PostgreSQL installation from builder stage (microdnf cannot install from module streams)
+COPY --from=builder /usr/bin/postgres /usr/bin/postgres
+COPY --from=builder /usr/bin/initdb /usr/bin/initdb
+COPY --from=builder /usr/bin/pg_ctl /usr/bin/pg_ctl
+COPY --from=builder /usr/bin/psql /usr/bin/psql
+COPY --from=builder /usr/lib64/libpq.so* /usr/lib64/
+COPY --from=builder /usr/lib64/pgsql/ /usr/lib64/pgsql/
+COPY --from=builder /usr/share/postgresql/ /usr/share/postgresql/
+COPY --from=builder /usr/share/pgsql/ /usr/share/pgsql/
+
+# Create postgres user if it doesn't exist (needed for lines 27-28)
+RUN grep -q '^postgres:' /etc/passwd || echo "postgres:x:26:26:PostgreSQL Server:/var/lib/pgsql:/bin/bash" >> /etc/passwd && \
+    grep -q '^postgres:' /etc/group || echo "postgres:x:26:" >> /etc/group
 
 RUN dnf update libksba libxml2 -y && dnf clean all
 
